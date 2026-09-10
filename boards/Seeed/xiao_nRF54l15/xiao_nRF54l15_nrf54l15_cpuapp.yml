@@ -1,0 +1,10 @@
+identifier: xiao_nRF54l15/nrf54l15/cpuapp
+name: Xiao nRF54L15 board
+vendor: Seeed
+arch: arm
+toolchain:
+  - zephyr
+sysbuild: true
+ram: 188
+flash: 1428
+supported: []

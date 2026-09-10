@@ -3,4 +3,4 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(ads1292-Firmware)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c src/ads1292r.c)

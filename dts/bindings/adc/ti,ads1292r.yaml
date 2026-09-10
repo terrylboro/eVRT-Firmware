@@ -1,0 +1,16 @@
+description: ADS1292R application-local SPI transport
+compatible: "ti,ads1292r"
+include: spi-device.yaml
+properties:
+  start-gpios:
+    type: phandle-array
+    required: true
+  reset-gpios:
+    type: phandle-array
+    required: true
+  drdy-gpios:
+    type: phandle-array
+    required: true
+  cs-gpios:
+    type: phandle-array
+    required: true

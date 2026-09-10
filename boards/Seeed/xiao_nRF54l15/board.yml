@@ -1,0 +1,8 @@
+board:
+  name: xiao_nRF54l15
+  vendor: Seeed
+  socs:
+  - name: nrf54l15
+    variants:
+    - name: xip
+      cpucluster: cpuflpr
