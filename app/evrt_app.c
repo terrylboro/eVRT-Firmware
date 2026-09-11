@@ -1,18 +1,20 @@
+#include "evrt_app.h"
+
 #include <stdint.h>
 #include <zephyr/kernel.h>
+
 #include "ads1292r.h"
 
 #define SAMPLE_PRINT_INTERVAL 25U
 
-int main(void)
+int evrt_app_run(void)
 {
-    printk("ADS1292R firmware build: spi00-test-signal-flow v2\n");
     printk("ADS1292R SPI transport: mode 1, 1.28 MHz\n");
 
     int ret = ads1292r_init();
     if (ret) {
         printk("ADS1292R initialization failed: %d\n", ret);
-        return 0;
+        return ret;
     }
 
     uint32_t sample_count = 0;

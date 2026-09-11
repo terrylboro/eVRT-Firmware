@@ -14,8 +14,8 @@ LOGIC_SEL -> 3V3
 CLKSEL -> right-hand pad / internal clock selection
 
 # How to Run
-1. From the overall project root (ads1292-Firmware/), run:
-west build -b "xiao_nRF54l15/nrf54l15/cpuapp" -d build_bb -p always examples/ads1292r_bitbang_id_test -- "-DBOARD_ROOT=C:/Users/teri-/Documents/ads1292-Firmware"
+1. From the overall project root (eVRT-Firmware/), run:
+west build -b "xiao_nRF54l15/nrf54l15/cpuapp" -d build_bb -p always examples/ads1292r_bitbang_id_test -- "-DBOARD_ROOT=C:/Users/teri-/Documents/eVRT-Firmware"
 
 2. To flash, run:
 west flash -d build_bb --runner openocd

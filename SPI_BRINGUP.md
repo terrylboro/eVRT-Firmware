@@ -25,7 +25,7 @@ nominal 512 kHz ADS clock. Console UART20 remains on P1.09/P1.08.
 From an nRF Connect SDK terminal in this folder:
 
 ```powershell
-west build -d build_spi -b xiao_nRF54l15/nrf54l15/cpuapp . -- "-DBOARD_ROOT=C:/Users/teri-/Documents/ads1292-Firmware" "-DCONF_FILE=prj.conf"
+west build -d build_spi -b xiao_nRF54l15/nrf54l15/cpuapp . -- "-DBOARD_ROOT=C:/Users/teri-/Documents/eVRT-Firmware" "-DCONF_FILE=prj.conf"
 west flash -d build_spi --runner openocd --openocd "C:/ProgramData/chocolatey/lib/openocd/tools/install/bin/openocd.exe"
 ```
 
