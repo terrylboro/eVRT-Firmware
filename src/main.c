@@ -1,9 +1,12 @@
+#include <stdint.h>
 #include <zephyr/kernel.h>
 #include "ads1292r.h"
 
+#define SAMPLE_PRINT_INTERVAL 25U
+
 int main(void)
 {
-    printk("ADS1292R firmware build: spi00-id-read v1\n");
+    printk("ADS1292R firmware build: spi00-test-signal-flow v2\n");
     printk("ADS1292R SPI transport: mode 1, 1.28 MHz\n");
 
     int ret = ads1292r_init();
@@ -12,19 +15,30 @@ int main(void)
         return 0;
     }
 
-    while (1) {
-        uint8_t id = 0;
+    uint32_t sample_count = 0;
 
-        ret = ads1292r_read_registers(ADS1292R_REG_ID, &id, 1);
+    while (1) {
+        struct ads1292r_sample sample;
+
+        ret = ads1292r_wait_for_sample(K_MSEC(1500));
         if (ret) {
-            printk("ADS1292R ID read failed: %d\n", ret);
-        } else if (id == ADS1292R_EXPECTED_ID) {
-            printk("ADS1292R ID OK: 0x%02x\n", id);
-        } else {
-            printk("ADS1292R ID mismatch: 0x%02x, expected 0x%02x\n",
-                   id, ADS1292R_EXPECTED_ID);
+            printk("ADS1292R DRDY timeout: %d\n", ret);
+            continue;
         }
 
-        k_sleep(K_SECONDS(1));
+        ret = ads1292r_read_sample(&sample);
+        if (ret) {
+            printk("ADS1292R sample read failed: %d\n", ret);
+            continue;
+        }
+
+        sample_count++;
+        if ((sample_count % SAMPLE_PRINT_INTERVAL) == 0U) {
+            printk("ADS sample %lu: status=%06x ch1=%ld ch2=%ld raw=%02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                   (unsigned long)sample_count, sample.status,
+                   (long)sample.ch1, (long)sample.ch2,
+                   sample.raw[0], sample.raw[1], sample.raw[2], sample.raw[3], sample.raw[4],
+                   sample.raw[5], sample.raw[6], sample.raw[7], sample.raw[8]);
+        }
     }
 }

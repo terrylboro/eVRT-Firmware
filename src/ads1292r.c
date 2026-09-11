@@ -4,25 +4,26 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
-#include <hal/nrf_common.h>
 
 #define ADS_NODE DT_NODELABEL(ads1292r)
 #define CMD_START 0x08
 #define CMD_STOP 0x0a
+#define CMD_RDATAC 0x10
 #define CMD_SDATAC 0x11
+#define CMD_RDATA 0x12
 #define CMD_RREG 0x20
 #define CMD_WREG 0x40
-#define ADS_SPI_REG ((void *)DT_REG_ADDR(DT_BUS(ADS_NODE)))
 
-#define REG_CONFIG1 0x01
-#define REG_CONFIG2 0x02
-#define REG_LOFF 0x03
-#define REG_CH1SET 0x04
-#define REG_CH2SET 0x05
-#define REG_RLDSENS 0x06
-#define REG_LOFFSENS 0x07
-#define REG_RESP1 0x09
-#define REG_RESP2 0x0a
+#define REG_CONFIG1 ADS1292R_REG_CONFIG1
+#define REG_CONFIG2 ADS1292R_REG_CONFIG2
+#define REG_LOFF ADS1292R_REG_LOFF
+#define REG_CH1SET ADS1292R_REG_CH1SET
+#define REG_CH2SET ADS1292R_REG_CH2SET
+#define REG_RLDSENS ADS1292R_REG_RLDSENS
+#define REG_LOFFSENS ADS1292R_REG_LOFFSENS
+#define REG_RESP1 ADS1292R_REG_RESP1
+#define REG_RESP2 ADS1292R_REG_RESP2
+#define REG_GPIO ADS1292R_REG_GPIO
 
 /* Mode 1 comes from spi-cpha in DT. 10 us CS setup/hold exceeds
  * the 3 tCLK final-clock-to-CS minimum at nominal 512 kHz CLK.
@@ -37,8 +38,6 @@ static const struct gpio_dt_spec drdy = GPIO_DT_SPEC_GET(ADS_NODE, drdy_gpios);
 static K_MUTEX_DEFINE(lock);
 static bool ready;
 
-// static uint8_t tx_cmd;
-// static uint8_t rx_ignored;
 
 static int transfer(uint8_t *tx, uint8_t *rx, size_t length);
 
@@ -58,16 +57,12 @@ static int transfer(uint8_t *tx, uint8_t *rx, size_t length)
     };
 
     config.cs.gpio.port = NULL;
-    printk("SPI transfer: tx=%p dma=%d rx=%p dma=%d len=%u\n",
-           tx, nrf_dma_accessible_check(ADS_SPI_REG, tx),
-           rx, rx ? nrf_dma_accessible_check(ADS_SPI_REG, rx) : 1,
-           (unsigned int)length);
     int ret = spi_transceive(bus.bus, &config, &tx_set, rx ? &rx_set : NULL);
     k_busy_wait(10);
     return ret;
 }
 
-static int send_command(uint8_t value)
+static int command_locked(uint8_t value)
 {
     int ret = gpio_pin_set_dt(&cs, 1);
     if (ret) { return ret; }
@@ -146,9 +141,55 @@ out:
     return ret;
 }
 
+static int write_register_locked(uint8_t address, uint8_t value)
+{
+    uint8_t safe = sanitize_write(address, value);
+    int ret = register_transaction_locked(address, NULL, &safe, 1);
+
+    printk("WREG 0x%02x=0x%02x ret=%d\n", address, safe, ret);
+    k_sleep(K_MSEC(10));
+    return ret;
+}
+
+static int configure_internal_test_locked(void)
+{
+    int ret;
+
+    /* Datasheet test-signal setup for bring-up without electrodes:
+     * - CONFIG1 0x00: 125 SPS, high-resolution mode default fields.
+     * - CONFIG2 0xa3: internal reference/test source enabled, 1 Hz test signal.
+     * - CH1SET 0x45: channel 1 enabled, gain 6, input mux = test signal.
+     * - CH2SET 0x45: channel 2 enabled, gain 6, input mux = test signal.
+     * Other values follow the ProtoCentral baseline, with respiration disabled for now.
+     */
+    ret = write_register_locked(REG_CONFIG1, 0x00);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_CONFIG2, 0xa3);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_LOFF, 0x10);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_CH1SET, 0x45);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_CH2SET, 0x45);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_RLDSENS, 0x00);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_LOFFSENS, 0x00);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_RESP1, 0x02);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_RESP2, 0x01);
+    if (ret) { return ret; }
+    ret = write_register_locked(REG_GPIO, 0x0c);
+    if (ret) { return ret; }
+
+    return 0;
+}
+
 int ads1292r_init(void)
 {
     int ret;
+    uint8_t regs[ADS1292R_REGISTER_COUNT] = {0};
 
     k_mutex_lock(&lock, K_FOREVER);
     ready = false;
@@ -162,45 +203,60 @@ int ads1292r_init(void)
         ret = -ENODEV;
         goto out;
     }
+
     ret = gpio_pin_configure_dt(&cs, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
-    ret = gpio_pin_configure_dt(&start, GPIO_OUTPUT_ACTIVE);
+    ret = gpio_pin_configure_dt(&start, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
     ret = gpio_pin_configure_dt(&reset, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
     ret = gpio_pin_configure_dt(&drdy, GPIO_INPUT);
     if (ret) { goto out; }
     printk("ADS init step 2: GPIO configured\n");
-    printk("Running ADS1292R reset + SDATAC startup sequence\n");
+    printk("Running ADS1292R initial power-up flow with internal test signals\n");
 
-    /* Match the bit-banged bring-up baseline: hold START low, pulse /RESET low,
-     * then release reset and send SDATAC before attempting register reads.
-     */
-    ret = gpio_pin_set_dt(&start, 0);
-    if (ret) { goto out; }
     ret = gpio_pin_set_dt(&cs, 0);
     if (ret) { goto out; }
+    ret = gpio_pin_set_dt(&start, 0);
+    if (ret) { goto out; }
 
-    printk("ADS init step 3: reset low for 100 ms\n");
+    printk("ADS init step 3: /RESET low for 100 ms\n");
     ret = gpio_pin_set_dt(&reset, 1);
     if (ret) { goto out; }
     k_sleep(K_MSEC(100));
 
-    printk("ADS init step 4: reset high, waiting 1 s\n");
+    printk("ADS init step 4: /RESET high, waiting 1 s\n");
     ret = gpio_pin_set_dt(&reset, 0);
     if (ret) { goto out; }
     k_sleep(K_SECONDS(1));
 
-    printk("ADS init step 5: START low, sending SDATAC only\n");
-    ret = gpio_pin_set_dt(&start, 0);
+    printk("ADS init step 5: SDATAC before register programming\n");
+    ret = command_locked(CMD_SDATAC);
     if (ret) { goto out; }
-    k_sleep(K_MSEC(100));
-
-    ret = send_command(CMD_SDATAC);
-    if (ret) { goto out; }
-    printk("Sent SDATAC command to ADS1292R, ret=%d\n", ret);
     k_sleep(K_MSEC(300));
-    printk("ADS init: ID-only mode, skipping register writes\n");
+
+    printk("ADS init step 6: programming internal test-signal registers\n");
+    ret = configure_internal_test_locked();
+    if (ret) { goto out; }
+
+    ret = register_transaction_locked(ADS1292R_REG_ID, regs, NULL, ADS1292R_REGISTER_COUNT);
+    if (ret) { goto out; }
+    printk("ADS register image:");
+    for (size_t i = 0; i < ADS1292R_REGISTER_COUNT; ++i) {
+        printk(" %02x", regs[i]);
+    }
+    printk("\n");
+
+    printk("ADS init step 7: START pin high, START command, and RDATAC\n");
+    ret = gpio_pin_set_dt(&start, 1);
+    if (ret) { goto out; }
+    k_sleep(K_MSEC(10));
+    ret = command_locked(CMD_START);
+    if (ret) { goto out; }
+    k_sleep(K_MSEC(10));
+    ret = command_locked(CMD_RDATAC);
+    if (ret) { goto out; }
+
     ready = true;
     ret = 0;
 out:
@@ -244,11 +300,68 @@ int ads1292r_write_registers(uint8_t address, const uint8_t *values, size_t coun
 
 
 
+int ads1292r_wait_for_sample(k_timeout_t timeout)
+{
+    k_timepoint_t end = sys_timepoint_calc(timeout);
 
+    do {
+        int value = gpio_pin_get_dt(&drdy);
 
+        if (value < 0) {
+            return value;
+        }
+        if (value > 0) {
+            return 0;
+        }
+        k_sleep(K_MSEC(1));
+    } while (!sys_timepoint_expired(end));
 
+    return -ETIMEDOUT;
+}
 
+static int32_t sign_extend_24(const uint8_t bytes[3])
+{
+    int32_t value = ((int32_t)bytes[0] << 16) | ((int32_t)bytes[1] << 8) | bytes[2];
 
+    if (value & 0x00800000) {
+        value |= 0xff000000;
+    }
 
+    return value;
+}
 
+int ads1292r_read_sample(struct ads1292r_sample *sample)
+{
+    uint8_t zeros[ADS1292R_FRAME_SIZE] = {0};
+    uint8_t rx[ADS1292R_FRAME_SIZE] = {0};
+    int ret;
+    int cs_ret;
 
+    if (!sample) { return -EINVAL; }
+
+    k_mutex_lock(&lock, K_FOREVER);
+    if (!ready) {
+        ret = -EACCES;
+        goto out;
+    }
+
+    ret = gpio_pin_set_dt(&cs, 1);
+    if (ret) { goto out; }
+    k_busy_wait(100);
+
+    ret = transfer(zeros, rx, sizeof(rx));
+    k_busy_wait(100);
+
+    cs_ret = gpio_pin_set_dt(&cs, 0);
+    if (ret == 0) { ret = cs_ret; }
+    if (ret) { goto out; }
+
+    memcpy(sample->raw, rx, sizeof(rx));
+    sample->status = ((uint32_t)rx[0] << 16) | ((uint32_t)rx[1] << 8) | rx[2];
+    sample->ch1 = sign_extend_24(&rx[3]);
+    sample->ch2 = sign_extend_24(&rx[6]);
+
+out:
+    k_mutex_unlock(&lock);
+    return ret;
+}
