@@ -39,7 +39,7 @@
     ads1292r: adc@0 {
         compatible = "ti,ads1292r";
         reg = <0>;
-        spi-max-frequency = <1280000>;
+        spi-max-frequency = <1280000>; // SPI is derived from even divider of 128MHz clock source
         spi-cpha;
         cs-gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
         start-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;

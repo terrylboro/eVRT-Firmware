@@ -70,18 +70,12 @@ static int transfer(uint8_t *tx, uint8_t *rx, size_t length)
 static int send_command(uint8_t value)
 {
     int ret = gpio_pin_set_dt(&cs, 1);
+    if (ret) { return ret; }
 
-    if (ret) { return ret; }
-    k_busy_wait(2000);
-    ret = gpio_pin_set_dt(&cs, 0);
-    if (ret) { return ret; }
-    k_busy_wait(2000);
-    ret = gpio_pin_set_dt(&cs, 1);
-
-    if (ret) { return ret; }
-    k_busy_wait(2000);
+    k_busy_wait(100);
     ret = transfer(&value, NULL, 1);
-    k_busy_wait(2000);
+    k_busy_wait(100);
+
     int cs_ret = gpio_pin_set_dt(&cs, 0);
     return ret ? ret : cs_ret;
 }
@@ -122,12 +116,14 @@ static int register_transaction_locked(uint8_t address, uint8_t *read_values,
 
     ret = gpio_pin_set_dt(&cs, 1);
     if (ret) { return ret; }
-    k_busy_wait(10);
+    k_sleep(K_MSEC(2));
 
     ret = transfer(&command, NULL, 1);
     if (ret) { goto out; }
+    k_sleep(K_MSEC(2));
     ret = transfer(&byte_count, NULL, 1);
     if (ret) { goto out; }
+    k_sleep(K_MSEC(2));
 
     if (write_values) {
         memcpy(zeros, write_values, count);
@@ -150,35 +146,6 @@ out:
     return ret;
 }
 
-int ads1292r_spi_smoke_test(void)
-{
-    int ret;
-    uint8_t pattern = 0xaa;
-
-    printk("ADS1292R SPI smoke test: CS low, sending 0xaa eight times\n");
-
-    if (!device_is_ready(bus.bus) || !gpio_is_ready_dt(&cs)) {
-        printk("ADS1292R SPI smoke test: spi=%d cs=%d\n",
-               device_is_ready(bus.bus), gpio_is_ready_dt(&cs));
-        return -ENODEV;
-    }
-
-    ret = gpio_pin_configure_dt(&cs, GPIO_OUTPUT_INACTIVE);
-    if (ret) { return ret; }
-
-    for (int i = 0; i < 8; ++i) {
-        ret = gpio_pin_set_dt(&cs, 1);
-        if (ret) { return ret; }
-        k_busy_wait(10);
-        ret = transfer(&pattern, NULL, 1);
-        k_busy_wait(10);
-        int cs_ret = gpio_pin_set_dt(&cs, 0);
-        if (ret || cs_ret) { return ret ? ret : cs_ret; }
-        k_sleep(K_MSEC(100));
-    }
-
-    return 0;
-}
 int ads1292r_init(void)
 {
     int ret;
@@ -204,16 +171,27 @@ int ads1292r_init(void)
     ret = gpio_pin_configure_dt(&drdy, GPIO_INPUT);
     if (ret) { goto out; }
     printk("ADS init step 2: GPIO configured\n");
-    printk("Running ADS1292R startup sequence without GPIO reset pulse\n");
+    printk("Running ADS1292R reset + SDATAC startup sequence\n");
 
-    /* Conservative POR/oscillator startup delay. Keep START low and send only SDATAC before ID reads so hardware bring-up is not obscured by register writes or conversion-control commands. */
-    k_sleep(K_SECONDS(1));
+    /* Match the bit-banged bring-up baseline: hold START low, pulse /RESET low,
+     * then release reset and send SDATAC before attempting register reads.
+     */
+    ret = gpio_pin_set_dt(&start, 0);
+    if (ret) { goto out; }
+    ret = gpio_pin_set_dt(&cs, 0);
+    if (ret) { goto out; }
 
+    printk("ADS init step 3: reset low for 100 ms\n");
+    ret = gpio_pin_set_dt(&reset, 1);
+    if (ret) { goto out; }
+    k_sleep(K_MSEC(100));
+
+    printk("ADS init step 4: reset high, waiting 1 s\n");
     ret = gpio_pin_set_dt(&reset, 0);
     if (ret) { goto out; }
-    printk("ADS init step 3: reset held inactive, wait complete\n");
+    k_sleep(K_SECONDS(1));
 
-    printk("Holding START low and sending SDATAC only\n");
+    printk("ADS init step 5: START low, sending SDATAC only\n");
     ret = gpio_pin_set_dt(&start, 0);
     if (ret) { goto out; }
     k_sleep(K_MSEC(100));
@@ -263,6 +241,8 @@ int ads1292r_write_registers(uint8_t address, const uint8_t *values, size_t coun
     if (!values || address == ADS1292R_REG_ID) { return -EINVAL; }
     return registers(address, NULL, values, count);
 }
+
+
 
 
 

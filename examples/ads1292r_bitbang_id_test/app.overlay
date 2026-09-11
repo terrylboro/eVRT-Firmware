@@ -1,0 +1,5 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&gpio1 { status = "okay"; };
+&gpio2 { status = "okay"; };
+&gpiote20 { status = "okay"; };
