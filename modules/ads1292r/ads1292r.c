@@ -193,6 +193,8 @@ int ads1292r_init(void)
 
     ret = gpio_pin_configure_dt(&cs, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
+
+
     ret = gpio_pin_configure_dt(&start, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
     ret = gpio_pin_configure_dt(&reset, GPIO_OUTPUT_INACTIVE);
@@ -349,3 +351,5 @@ out:
     k_mutex_unlock(&lock);
     return ret;
 }
+
+

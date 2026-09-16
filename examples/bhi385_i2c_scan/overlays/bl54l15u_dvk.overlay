@@ -1,0 +1,75 @@
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/*
+ * BHI385 / BHI360 shuttle I2C bring-up for the Ezurio BL54L15u DVK.
+ *
+ * Planned wiring:
+ *   Shuttle VDD/VDDIO -> 1V8 / VDD_nRF
+ *   Shuttle GND       -> GND
+ *   Shuttle SDA       -> P1.12 / MikroE_SDA
+ *   Shuttle SCL       -> P1.11 / MikroE_SCL
+ *
+ * This overlay is intentionally separate from the ADS1292R overlay because
+ * P1.11 and P1.12 are used there as ADS CS and DRDY.
+ */
+
+/ {
+    chosen {
+        zephyr,console = &uart20;
+        zephyr,shell-uart = &uart20;
+    };
+
+    aliases {
+        bhi385-i2c = &i2c22;
+    };
+};
+
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&gpio2 { status = "okay"; };
+&gpiote20 { status = "okay"; };
+&gpiote30 { status = "okay"; };
+&clock { status = "okay"; };
+
+&uart20 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart20_default>;
+    pinctrl-1 = <&uart20_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&pinctrl {
+    bhi385_i2c_default: bhi385_i2c_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 12)>,
+                    <NRF_PSEL(TWIM_SCL, 1, 11)>;
+            bias-pull-up;
+        };
+    };
+
+    bhi385_i2c_sleep: bhi385_i2c_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 12)>,
+                    <NRF_PSEL(TWIM_SCL, 1, 11)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2c22 {
+    compatible = "nordic,nrf-twim";
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    pinctrl-0 = <&bhi385_i2c_default>;
+    pinctrl-1 = <&bhi385_i2c_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+
+    bhi360: bhi360@28 {
+        compatible = "i2c-device";
+        reg = <0x28>;
+    };
+};

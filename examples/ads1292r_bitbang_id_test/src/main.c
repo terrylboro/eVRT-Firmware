@@ -1,18 +1,31 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 
-#define BB_SCK_PORT_NODE   DT_NODELABEL(gpio2)
-#define BB_SCK_PIN         1
-#define BB_MOSI_PORT_NODE  DT_NODELABEL(gpio2)
-#define BB_MOSI_PIN        2
-#define BB_MISO_PORT_NODE  DT_NODELABEL(gpio2)
-#define BB_MISO_PIN        4
-#define BB_CS_PORT_NODE    DT_NODELABEL(gpio1)
-#define BB_CS_PIN          5
-#define BB_START_PORT_NODE DT_NODELABEL(gpio1)
-#define BB_START_PIN       7
-#define BB_RESET_PORT_NODE DT_NODELABEL(gpio1)
-#define BB_RESET_PIN       10
+#define BB_SCK_NODE   DT_ALIAS(ads_bb_sck)
+#define BB_MOSI_NODE  DT_ALIAS(ads_bb_mosi)
+#define BB_MISO_NODE  DT_ALIAS(ads_bb_miso)
+#define BB_CS_NODE    DT_ALIAS(ads_bb_cs)
+#define BB_START_NODE DT_ALIAS(ads_bb_start)
+#define BB_RESET_NODE DT_ALIAS(ads_bb_reset)
+
+#if !DT_NODE_HAS_STATUS(BB_SCK_NODE, okay) || !DT_NODE_HAS_STATUS(BB_MOSI_NODE, okay) || \
+    !DT_NODE_HAS_STATUS(BB_MISO_NODE, okay) || !DT_NODE_HAS_STATUS(BB_CS_NODE, okay) || \
+    !DT_NODE_HAS_STATUS(BB_START_NODE, okay) || !DT_NODE_HAS_STATUS(BB_RESET_NODE, okay)
+#error "ADS1292R bitbang example requires ads-bb-* aliases in the active overlay"
+#endif
+
+#define BB_SCK_PORT_NODE   DT_GPIO_CTLR(BB_SCK_NODE, gpios)
+#define BB_SCK_PIN         DT_GPIO_PIN(BB_SCK_NODE, gpios)
+#define BB_MOSI_PORT_NODE  DT_GPIO_CTLR(BB_MOSI_NODE, gpios)
+#define BB_MOSI_PIN        DT_GPIO_PIN(BB_MOSI_NODE, gpios)
+#define BB_MISO_PORT_NODE  DT_GPIO_CTLR(BB_MISO_NODE, gpios)
+#define BB_MISO_PIN        DT_GPIO_PIN(BB_MISO_NODE, gpios)
+#define BB_CS_PORT_NODE    DT_GPIO_CTLR(BB_CS_NODE, gpios)
+#define BB_CS_PIN          DT_GPIO_PIN(BB_CS_NODE, gpios)
+#define BB_START_PORT_NODE DT_GPIO_CTLR(BB_START_NODE, gpios)
+#define BB_START_PIN       DT_GPIO_PIN(BB_START_NODE, gpios)
+#define BB_RESET_PORT_NODE DT_GPIO_CTLR(BB_RESET_NODE, gpios)
+#define BB_RESET_PIN       DT_GPIO_PIN(BB_RESET_NODE, gpios)
 
 static const struct device *const bb_sck = DEVICE_DT_GET(BB_SCK_PORT_NODE);
 static const struct device *const bb_mosi = DEVICE_DT_GET(BB_MOSI_PORT_NODE);
@@ -57,6 +70,13 @@ static void bb_send_command(uint8_t command)
 static void ads1292r_bitbang_id_test(void)
 {
     printk("ADS1292R bitbang test: slow GPIO SPI, reading ID only\n");
+    printk("ADS1292R bitbang pins: SCK P%u.%u MOSI P%u.%u MISO P%u.%u CS P%u.%u START P%u.%u /PWDN P%u.%u\n",
+           (unsigned)DT_REG_ADDR(BB_SCK_PORT_NODE), BB_SCK_PIN,
+           (unsigned)DT_REG_ADDR(BB_MOSI_PORT_NODE), BB_MOSI_PIN,
+           (unsigned)DT_REG_ADDR(BB_MISO_PORT_NODE), BB_MISO_PIN,
+           (unsigned)DT_REG_ADDR(BB_CS_PORT_NODE), BB_CS_PIN,
+           (unsigned)DT_REG_ADDR(BB_START_PORT_NODE), BB_START_PIN,
+           (unsigned)DT_REG_ADDR(BB_RESET_PORT_NODE), BB_RESET_PIN);
 
     if (!device_is_ready(bb_sck) || !device_is_ready(bb_mosi) ||
         !device_is_ready(bb_miso) || !device_is_ready(bb_cs) ||
@@ -72,15 +92,13 @@ static void ads1292r_bitbang_id_test(void)
     gpio_pin_configure(bb_start, BB_START_PIN, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure(bb_reset, BB_RESET_PIN, GPIO_OUTPUT_INACTIVE);
 
-    printk("ADS1292R bitbang test: reset low for 100 ms\n");
+    printk("ADS1292R bitbang test: XIAO-style /PWDN reset pulse\n");
     gpio_pin_set(bb_start, BB_START_PIN, 0);
     gpio_pin_set(bb_cs, BB_CS_PIN, 1);
     gpio_pin_set(bb_sck, BB_SCK_PIN, 0);
     gpio_pin_set(bb_mosi, BB_MOSI_PIN, 0);
     gpio_pin_set(bb_reset, BB_RESET_PIN, 0);
     k_sleep(K_MSEC(100));
-
-    printk("ADS1292R bitbang test: reset high, waiting 1 s\n");
     gpio_pin_set(bb_reset, BB_RESET_PIN, 1);
     k_sleep(K_SECONDS(1));
 
@@ -93,6 +111,7 @@ static void ads1292r_bitbang_id_test(void)
         uint8_t h0, h1, h2;
         uint8_t l0, l1, l2;
 
+        gpio_pin_set(bb_start, BB_START_PIN, 0);
         gpio_pin_set(bb_cs, BB_CS_PIN, 0);
         k_sleep(K_MSEC(2));
         bb_transfer_byte(0x20, &h0, &l0); /* RREG 0 */
@@ -111,9 +130,16 @@ static void ads1292r_bitbang_id_test(void)
 
 int main(void)
 {
-    printk("ADS1292R firmware build: bitbang-reset-phase-test v1\n");
+    printk("ADS1292R firmware build: bitbang-xiao-reset-sequence-test v3\n");
     ads1292r_bitbang_id_test();
     return 0;
 }
+
+
+
+
+
+
+
 
 

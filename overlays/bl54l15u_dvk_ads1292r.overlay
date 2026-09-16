@@ -1,0 +1,102 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/*
+ * ADS1292R wiring for the Ezurio BL54L15u DVK / 453-00223-K1.
+ *
+ * This overlay keeps the application driver unchanged and only describes the
+ * board-specific pins.  It uses the DVK's mikroBUS-style header names:
+ *
+ *   ADS SCK        -> SCK / P2.01
+ *   ADS DIN/MOSI   -> MOSI / P2.02
+ *   ADS DOUT/MISO  -> MISO / P2.04
+ *   ADS CS         -> GPIO / P1.11
+ *   ADS DRDY       -> GPIO / P1.12
+ *   ADS PWDN/RESET -> P1.13
+ *   ADS START      -> MB_TX / P1.09
+ *
+ * The BL54L15u DVK board definition already has an SPI NOR flash on spi00 chip
+ * select 0.  The ADS1292R is therefore added as chip select 1, so both devices
+ * can share the same SCK/MOSI/MISO bus without reusing the flash CS line.
+ */
+
+
+/ {
+    chosen {
+        zephyr,console = &uart30;
+        zephyr,shell-uart = &uart30;
+        zephyr,uart-mcumgr = &uart30;
+        zephyr,bt-mon-uart = &uart30;
+        zephyr,bt-c2h-uart = &uart30;
+    };
+};
+
+&uart30 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart30_default>;
+    pinctrl-1 = <&uart30_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&gpio2 { status = "okay"; };
+&gpiote20 { status = "okay"; };
+&clock { status = "okay"; };
+
+/* These default DVK functions use GPIOs selected above. */
+&button0 { status = "disabled"; };  /* P1.13 / ADS /PWDN */
+&button1 { status = "disabled"; };  /* P1.09 / MB_TX / ADS START */
+&button2 { status = "disabled"; };  /* P1.08 / MB_RX, left unused for ADS */
+
+&pinctrl {
+    ads_spi_default: ads_spi_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
+                    <NRF_PSEL(SPIM_MOSI, 2, 2)>;
+        };
+        group2 {
+            psels = <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            bias-pull-up;
+        };
+    };
+
+    ads_spi_sleep: ads_spi_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
+                    <NRF_PSEL(SPIM_MOSI, 2, 2)>,
+                    <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            low-power-enable;
+        };
+    };
+};
+
+&spi00 {
+    status = "okay";
+    pinctrl-0 = <&ads_spi_default>;
+    pinctrl-1 = <&ads_spi_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    /* Keep the onboard flash CS at index 0 and add ADS CS at index 1. */
+    cs-gpios = <&gpio2 5 GPIO_ACTIVE_LOW>,
+               <&gpio1 11 GPIO_ACTIVE_LOW>;
+
+    ads1292r: adc@1 {
+        compatible = "ti,ads1292r";
+        reg = <1>;
+        spi-max-frequency = <1280000>;
+        spi-cpha;
+        cs-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
+        start-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+        drdy-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+    };
+};
+
+
+
+
+
+
+
+

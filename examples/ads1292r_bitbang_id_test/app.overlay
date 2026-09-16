@@ -3,3 +3,24 @@
 &gpio1 { status = "okay"; };
 &gpio2 { status = "okay"; };
 &gpiote20 { status = "okay"; };
+
+/ {
+    ads_bitbang_pins: ads-bitbang-pins {
+        compatible = "gpio-leds";
+        ads_bb_sck: ads-bb-sck { gpios = <&gpio2 1 GPIO_ACTIVE_HIGH>; };
+        ads_bb_mosi: ads-bb-mosi { gpios = <&gpio2 2 GPIO_ACTIVE_HIGH>; };
+        ads_bb_miso: ads-bb-miso { gpios = <&gpio2 4 GPIO_ACTIVE_HIGH>; };
+        ads_bb_cs: ads-bb-cs { gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>; };
+        ads_bb_start: ads-bb-start { gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>; };
+        ads_bb_reset: ads-bb-reset { gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>; };
+    };
+
+    aliases {
+        ads-bb-sck = &ads_bb_sck;
+        ads-bb-mosi = &ads_bb_mosi;
+        ads-bb-miso = &ads_bb_miso;
+        ads-bb-cs = &ads_bb_cs;
+        ads-bb-start = &ads_bb_start;
+        ads-bb-reset = &ads_bb_reset;
+    };
+};
