@@ -9,6 +9,9 @@ FIFO for a short baseline capture. By default it uses Bosch's BHI360-only
 
 It is the next baseline after `examples/bhi385_i2c_scan`.
 
+See `modules/bhi360/README.md` for the current bring-up status, known-good
+output, diagnostic examples, and next steps.
+
 ## Hardware
 
 Ezurio BL54L15u DVK wiring:
