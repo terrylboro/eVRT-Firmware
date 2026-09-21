@@ -42,9 +42,9 @@ I2S amp wiring:
 
 | nRF54L15 DK | MAX98357A BFF |
 | --- | --- |
-| P2.06 | BCLK |
-| P2.07 | LRC / WS |
-| P2.08 | DIN |
+| P1.11 | BCLK |
+| P1.12 | LRC / WS |
+| P1.15 | DIN |
 | 3V3 | VIN |
 | GND | GND |
 
@@ -52,14 +52,15 @@ MicroSD SPI wiring:
 
 | nRF54L15 DK | BFF MicroSD |
 | --- | --- |
-| P2.01 | SCK |
-| P2.02 | MOSI |
-| P2.04 | MISO |
-| P2.05 | CS |
+| P0.04 | SCK |
+| P0.00 | MOSI |
+| P0.01 | MISO |
+| P0.02 | CS |
 
-The Nordic DK overlay reuses the default `spi00` external-flash pins for the SD
-card, so it disables the onboard `mx25r64` flash node while this audio test is
-running.
+The Nordic DK overlay uses `spi30` for the SD card and `i2s20` on P1 because
+I2S20 is tied to the P1 GPIO domain on nRF54L15. It disables UART30/I2C30 and
+button3 while this audio test is running because those share the selected P0
+pins.
 
 ## SD Card
 
