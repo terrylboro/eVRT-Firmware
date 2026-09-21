@@ -6,6 +6,8 @@ MicroSD card through the MAX98357A I2S amplifier.
 
 ## Wiring
 
+### Ezurio BL54L15u DVK
+
 I2S amp wiring:
 
 | BL54L15u DVK | MAX98357A BFF |
@@ -31,6 +33,34 @@ The SD SPI clock is intentionally limited to 250 kHz for wired bring-up.
 The overlay disables `uart20` and moves the console to `uart30` because the
 board default UART20 pins are reused for SD SPI in this baseline.
 
+### Nordic nRF54L15 DK
+
+Set the DK target voltage to 3V3 in Nordic Board Programmer before wiring the
+audio module.
+
+I2S amp wiring:
+
+| nRF54L15 DK | MAX98357A BFF |
+| --- | --- |
+| P2.06 | BCLK |
+| P2.07 | LRC / WS |
+| P2.08 | DIN |
+| 3V3 | VIN |
+| GND | GND |
+
+MicroSD SPI wiring:
+
+| nRF54L15 DK | BFF MicroSD |
+| --- | --- |
+| P2.01 | SCK |
+| P2.02 | MOSI |
+| P2.04 | MISO |
+| P2.05 | CS |
+
+The Nordic DK overlay reuses the default `spi00` external-flash pins for the SD
+card, so it disables the onboard `mx25r64` flash node while this audio test is
+running.
+
 ## SD Card
 
 Format the card as FAT/FAT32 and place a 16-bit PCM WAV file named:
@@ -50,6 +80,15 @@ west flash -d build_bl54l15u_audio
 ```
 
 Open the second virtual COM port, usually `VCOM1`, at `115200 8N1`.
+
+For the Nordic nRF54L15 DK:
+
+```powershell
+west build -b "nrf54l15dk/nrf54l15/cpuapp" -d build_nrf54l15dk_audio -p always examples/audio_max98357a_sd -- "-DDTC_OVERLAY_FILE=overlays/nrf54l15dk.overlay"
+west flash -d build_nrf54l15dk_audio
+```
+
+Open the DK serial console at `115200 8N1`.
 
 ## Expected Output
 

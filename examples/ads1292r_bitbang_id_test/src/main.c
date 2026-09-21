@@ -27,6 +27,13 @@
 #define BB_RESET_PORT_NODE DT_GPIO_CTLR(BB_RESET_NODE, gpios)
 #define BB_RESET_PIN       DT_GPIO_PIN(BB_RESET_NODE, gpios)
 
+#define BB_SCK_PORT_NAME   DT_NODE_FULL_NAME(BB_SCK_PORT_NODE)
+#define BB_MOSI_PORT_NAME  DT_NODE_FULL_NAME(BB_MOSI_PORT_NODE)
+#define BB_MISO_PORT_NAME  DT_NODE_FULL_NAME(BB_MISO_PORT_NODE)
+#define BB_CS_PORT_NAME    DT_NODE_FULL_NAME(BB_CS_PORT_NODE)
+#define BB_START_PORT_NAME DT_NODE_FULL_NAME(BB_START_PORT_NODE)
+#define BB_RESET_PORT_NAME DT_NODE_FULL_NAME(BB_RESET_PORT_NODE)
+
 static const struct device *const bb_sck = DEVICE_DT_GET(BB_SCK_PORT_NODE);
 static const struct device *const bb_mosi = DEVICE_DT_GET(BB_MOSI_PORT_NODE);
 static const struct device *const bb_miso = DEVICE_DT_GET(BB_MISO_PORT_NODE);
@@ -70,13 +77,13 @@ static void bb_send_command(uint8_t command)
 static void ads1292r_bitbang_id_test(void)
 {
     printk("ADS1292R bitbang test: slow GPIO SPI, reading ID only\n");
-    printk("ADS1292R bitbang pins: SCK P%u.%u MOSI P%u.%u MISO P%u.%u CS P%u.%u START P%u.%u /PWDN P%u.%u\n",
-           (unsigned)DT_REG_ADDR(BB_SCK_PORT_NODE), BB_SCK_PIN,
-           (unsigned)DT_REG_ADDR(BB_MOSI_PORT_NODE), BB_MOSI_PIN,
-           (unsigned)DT_REG_ADDR(BB_MISO_PORT_NODE), BB_MISO_PIN,
-           (unsigned)DT_REG_ADDR(BB_CS_PORT_NODE), BB_CS_PIN,
-           (unsigned)DT_REG_ADDR(BB_START_PORT_NODE), BB_START_PIN,
-           (unsigned)DT_REG_ADDR(BB_RESET_PORT_NODE), BB_RESET_PIN);
+    printk("ADS1292R bitbang pins: SCK %s.%u MOSI %s.%u MISO %s.%u CS %s.%u START %s.%u /PWDN %s.%u\n",
+           BB_SCK_PORT_NAME, BB_SCK_PIN,
+           BB_MOSI_PORT_NAME, BB_MOSI_PIN,
+           BB_MISO_PORT_NAME, BB_MISO_PIN,
+           BB_CS_PORT_NAME, BB_CS_PIN,
+           BB_START_PORT_NAME, BB_START_PIN,
+           BB_RESET_PORT_NAME, BB_RESET_PIN);
 
     if (!device_is_ready(bb_sck) || !device_is_ready(bb_mosi) ||
         !device_is_ready(bb_miso) || !device_is_ready(bb_cs) ||
@@ -130,7 +137,7 @@ static void ads1292r_bitbang_id_test(void)
 
 int main(void)
 {
-    printk("ADS1292R firmware build: bitbang-xiao-reset-sequence-test v3\n");
+    printk("ADS1292R firmware build: bitbang-id-test v4\n");
     ads1292r_bitbang_id_test();
     return 0;
 }

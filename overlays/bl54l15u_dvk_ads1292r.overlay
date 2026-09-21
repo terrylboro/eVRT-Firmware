@@ -7,17 +7,16 @@
  * This overlay keeps the application driver unchanged and only describes the
  * board-specific pins.  It uses the DVK's mikroBUS-style header names:
  *
- *   ADS SCK        -> SCK / P2.01
- *   ADS DIN/MOSI   -> MOSI / P2.02
- *   ADS DOUT/MISO  -> MISO / P2.04
- *   ADS CS         -> GPIO / P1.11
+ *   ADS SCK        -> P1.04
+ *   ADS DIN/MOSI   -> P1.05
+ *   ADS DOUT/MISO  -> P1.06
+ *   ADS CS         -> P1.07
  *   ADS DRDY       -> GPIO / P1.12
  *   ADS PWDN/RESET -> P1.13
  *   ADS START      -> MB_TX / P1.09
  *
- * The BL54L15u DVK board definition already has an SPI NOR flash on spi00 chip
- * select 0.  The ADS1292R is therefore added as chip select 1, so both devices
- * can share the same SCK/MOSI/MISO bus without reusing the flash CS line.
+ * These SPI pins match the audio SD bring-up wiring so the ADS can be tested
+ * on a header path already proven to work electrically.
  */
 
 
@@ -44,6 +43,10 @@
 &gpiote20 { status = "okay"; };
 &clock { status = "okay"; };
 
+&uart20 {
+    status = "disabled";
+};
+
 /* These default DVK functions use GPIOs selected above. */
 &button0 { status = "disabled"; };  /* P1.13 / ADS /PWDN */
 &button1 { status = "disabled"; };  /* P1.09 / MB_TX / ADS START */
@@ -52,47 +55,43 @@
 &pinctrl {
     ads_spi_default: ads_spi_default {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
-                    <NRF_PSEL(SPIM_MOSI, 2, 2)>;
+            psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+                    <NRF_PSEL(SPIM_MOSI, 1, 5)>;
         };
         group2 {
-            psels = <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            psels = <NRF_PSEL(SPIM_MISO, 1, 6)>;
             bias-pull-up;
         };
     };
 
     ads_spi_sleep: ads_spi_sleep {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
-                    <NRF_PSEL(SPIM_MOSI, 2, 2)>,
-                    <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+                    <NRF_PSEL(SPIM_MOSI, 1, 5)>,
+                    <NRF_PSEL(SPIM_MISO, 1, 6)>;
             low-power-enable;
         };
     };
 };
 
-&spi00 {
+&spi21 {
     status = "okay";
     pinctrl-0 = <&ads_spi_default>;
     pinctrl-1 = <&ads_spi_sleep>;
     pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
 
-    /* Keep the onboard flash CS at index 0 and add ADS CS at index 1. */
-    cs-gpios = <&gpio2 5 GPIO_ACTIVE_LOW>,
-               <&gpio1 11 GPIO_ACTIVE_LOW>;
-
-    ads1292r: adc@1 {
+    ads1292r: adc@0 {
         compatible = "ti,ads1292r";
-        reg = <1>;
-        spi-max-frequency = <1280000>;
+        reg = <0>;
+        spi-max-frequency = <1000000>;
         spi-cpha;
-        cs-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
-        start-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
-        reset-gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
-        drdy-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+        cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
+        start-gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+        drdy-gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;
     };
 };
-
 
 
 

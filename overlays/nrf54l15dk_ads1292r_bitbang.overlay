@@ -1,0 +1,49 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/*
+ * ADS1292R GPIO bitbang wiring for the Nordic nRF54L15 DK.
+ *
+ * Configure the DK target voltage to 3V3 in Nordic Board Programmer before
+ * connecting the ADS1292R logic pins.
+ *
+ *   ADS SCK        -> P1.08
+ *   ADS DIN/MOSI   -> P1.09
+ *   ADS DOUT/MISO  -> P1.10
+ *   ADS CS         -> P1.11
+ *   ADS START      -> P1.12
+ *   ADS PWDN/RESET -> P1.13
+ *
+ * This keeps the ADS logic wiring on Port P1 as much as possible and avoids
+ * the DK's default UART20 console pins on P1.04/P1.05/P1.06/P1.07.
+ */
+
+&gpio1 { status = "okay"; };
+&gpiote20 { status = "okay"; };
+
+/* These DK functions use pins selected above for ADS signals. */
+&button0 { status = "disabled"; };  /* P1.13 / ADS PWDN/RESET */
+&button1 { status = "disabled"; };  /* P1.09 / ADS DIN/MOSI */
+&button2 { status = "disabled"; };  /* P1.08 / ADS SCK */
+&led1 { status = "disabled"; };     /* P1.10 / ADS DOUT/MISO */
+&pwm20 { status = "disabled"; };
+
+/ {
+    ads_bitbang_pins: ads-bitbang-pins {
+        compatible = "gpio-leds";
+        ads_bb_sck: ads-bb-sck { gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>; };
+        ads_bb_mosi: ads-bb-mosi { gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>; };
+        ads_bb_miso: ads-bb-miso { gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>; };
+        ads_bb_cs: ads-bb-cs { gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>; };
+        ads_bb_start: ads-bb-start { gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>; };
+        ads_bb_reset: ads-bb-reset { gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>; };
+    };
+
+    aliases {
+        ads-bb-sck = &ads_bb_sck;
+        ads-bb-mosi = &ads_bb_mosi;
+        ads-bb-miso = &ads_bb_miso;
+        ads-bb-cs = &ads_bb_cs;
+        ads-bb-start = &ads_bb_start;
+        ads-bb-reset = &ads_bb_reset;
+    };
+};

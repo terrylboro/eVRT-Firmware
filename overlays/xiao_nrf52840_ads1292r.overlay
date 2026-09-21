@@ -1,0 +1,34 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/*
+ * ADS1292R wiring for Seeed XIAO BLE nRF52840.
+ *
+ * Physical XIAO pins match the previous XIAO ADS bring-up:
+ *   ADS SCK        -> D8  / P1.13
+ *   ADS DOUT/MISO  -> D9  / P1.14
+ *   ADS DIN/MOSI   -> D10 / P1.15
+ *   ADS CS         -> D1
+ *   ADS DRDY       -> D2
+ *   ADS START      -> D3
+ *   ADS PWDN/RESET -> D4
+ */
+
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&gpiote { status = "okay"; };
+
+&xiao_spi {
+    status = "okay";
+    cs-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+
+    ads1292r: adc@0 {
+        compatible = "ti,ads1292r";
+        reg = <0>;
+        spi-max-frequency = <1000000>;
+        spi-cpha;
+        cs-gpios = <&xiao_d 1 GPIO_ACTIVE_LOW>;
+        drdy-gpios = <&xiao_d 2 GPIO_ACTIVE_LOW>;
+        start-gpios = <&xiao_d 3 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&xiao_d 4 GPIO_ACTIVE_LOW>;
+    };
+};

@@ -1,0 +1,106 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/*
+ * Nordic nRF54L15 DK + Adafruit Audio BFF MAX98357A I2S & MicroSD baseline.
+ *
+ * Configure the DK target voltage to 3V3 in Nordic Board Programmer before
+ * connecting the audio module.
+ *
+ * I2S amp on P2:
+ *   P2.06 -> MAX98357A BCLK
+ *   P2.07 -> MAX98357A LRC / WS
+ *   P2.08 -> MAX98357A DIN
+ *
+ * MicroSD SPI on P2:
+ *   P2.01 -> SD SCK
+ *   P2.02 -> SD MOSI
+ *   P2.04 -> SD MISO
+ *   P2.05 -> SD CS
+ *
+ * The SD mapping reuses the DK's default spi00 external-flash pins, so the
+ * mx25r64 flash node is disabled for this audio test.
+ */
+
+/ {
+    aliases {
+        i2s-tx = &i2s20;
+    };
+};
+
+&gpio2 { status = "okay"; };
+&gpiote20 { status = "okay"; };
+&clock { status = "okay"; };
+
+&mx25r64 {
+    status = "disabled";
+};
+
+&pinctrl {
+    audio_i2s20_default: audio_i2s20_default {
+        group1 {
+            psels = <NRF_PSEL(I2S_SCK_M, 2, 6)>,
+                    <NRF_PSEL(I2S_LRCK_M, 2, 7)>,
+                    <NRF_PSEL(I2S_SDOUT, 2, 8)>;
+        };
+    };
+
+    audio_i2s20_sleep: audio_i2s20_sleep {
+        group1 {
+            psels = <NRF_PSEL(I2S_SCK_M, 2, 6)>,
+                    <NRF_PSEL(I2S_LRCK_M, 2, 7)>,
+                    <NRF_PSEL(I2S_SDOUT, 2, 8)>;
+            low-power-enable;
+        };
+    };
+
+    audio_sd_spi00_default: audio_sd_spi00_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
+                    <NRF_PSEL(SPIM_MOSI, 2, 2)>;
+        };
+
+        group2 {
+            psels = <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            bias-pull-up;
+        };
+    };
+
+    audio_sd_spi00_sleep: audio_sd_spi00_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
+                    <NRF_PSEL(SPIM_MOSI, 2, 2)>,
+                    <NRF_PSEL(SPIM_MISO, 2, 4)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2s20 {
+    status = "okay";
+    pinctrl-0 = <&audio_i2s20_default>;
+    pinctrl-1 = <&audio_i2s20_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&spi00 {
+    status = "okay";
+    cs-gpios = <&gpio2 5 GPIO_ACTIVE_LOW>;
+    pinctrl-0 = <&audio_sd_spi00_default>;
+    pinctrl-1 = <&audio_sd_spi00_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    sdhc0: sdhc@0 {
+        compatible = "zephyr,sdhc-spi-slot";
+        reg = <0>;
+        status = "okay";
+        spi-max-frequency = <250000>;
+        power-delay-ms = <100>;
+
+        mmc {
+            compatible = "zephyr,sdmmc-disk";
+            disk-name = "SD";
+            status = "okay";
+        };
+    };
+};

@@ -32,7 +32,6 @@
  */
 static const struct spi_dt_spec bus =
     SPI_DT_SPEC_GET(ADS_NODE, SPI_OP_MODE_MASTER | SPI_WORD_SET(8), 10);
-static const struct gpio_dt_spec cs = GPIO_DT_SPEC_GET(ADS_NODE, cs_gpios);
 static const struct gpio_dt_spec start = GPIO_DT_SPEC_GET(ADS_NODE, start_gpios);
 static const struct gpio_dt_spec reset = GPIO_DT_SPEC_GET(ADS_NODE, reset_gpios);
 static const struct gpio_dt_spec drdy = GPIO_DT_SPEC_GET(ADS_NODE, drdy_gpios);
@@ -43,30 +42,20 @@ static int transfer(uint8_t *tx, uint8_t *rx, size_t length)
 {
     struct spi_buf tx_buf = {.buf = tx, .len = length};
     struct spi_buf rx_buf = {.buf = rx, .len = length};
-    struct spi_config config = bus.config;
     const struct spi_buf_set tx_set = {.buffers = &tx_buf, .count = 1};
     const struct spi_buf_set rx_set = {
         .buffers = rx ? &rx_buf : NULL,
         .count = rx ? 1 : 0,
     };
 
-    config.cs.gpio.port = NULL;
-    int ret = spi_transceive(bus.bus, &config, &tx_set, rx ? &rx_set : NULL);
+    int ret = spi_transceive_dt(&bus, &tx_set, rx ? &rx_set : NULL);
     k_busy_wait(10);
     return ret;
 }
 
 static int command_locked(uint8_t value)
 {
-    int ret = gpio_pin_set_dt(&cs, 1);
-    if (ret) { return ret; }
-
-    k_busy_wait(100);
-    ret = transfer(&value, NULL, 1);
-    k_busy_wait(100);
-
-    int cs_ret = gpio_pin_set_dt(&cs, 0);
-    return ret ? ret : cs_ret;
+    return transfer(&value, NULL, 1);
 }
 
 static uint8_t sanitize_write(uint8_t address, uint8_t value)
@@ -98,36 +87,20 @@ static int register_transaction_locked(uint8_t address, uint8_t *read_values,
 {
     uint8_t command = (write_values ? CMD_WREG : CMD_RREG) | address;
     uint8_t byte_count = count - 1;
-    uint8_t zeros[ADS1292R_REGISTER_COUNT] = {0};
-    uint8_t rx[ADS1292R_REGISTER_COUNT] = {0};
+    uint8_t tx[ADS1292R_REGISTER_COUNT + 2] = {command, byte_count};
+    uint8_t rx[ADS1292R_REGISTER_COUNT + 2] = {0};
     int ret;
-    int cs_ret;
-
-    ret = gpio_pin_set_dt(&cs, 1);
-    if (ret) { return ret; }
-    k_sleep(K_MSEC(2));
-
-    ret = transfer(&command, NULL, 1);
-    if (ret) { goto out; }
-    k_sleep(K_MSEC(2));
-
-    ret = transfer(&byte_count, NULL, 1);
-    if (ret) { goto out; }
-    k_sleep(K_MSEC(2));
 
     if (write_values) {
-        memcpy(zeros, write_values, count);
-        ret = transfer(zeros, NULL, count);
+        memcpy(&tx[2], write_values, count);
+        ret = transfer(tx, NULL, count + 2);
     } else {
-        ret = transfer(zeros, rx, count);
+        ret = transfer(tx, rx, count + 2);
         if (ret == 0) {
-            memcpy(read_values, rx, count);
+            memcpy(read_values, &rx[2], count);
         }
     }
 
-out:
-    cs_ret = gpio_pin_set_dt(&cs, 0);
-    if (ret == 0) { ret = cs_ret; }
     return ret;
 }
 
@@ -184,16 +157,11 @@ int ads1292r_init(void)
     ready = false;
     printk("ADS init: checking devices\n");
 
-    if (!device_is_ready(bus.bus) || !gpio_is_ready_dt(&start) ||
-        !gpio_is_ready_dt(&reset) || !gpio_is_ready_dt(&drdy) ||
-        !gpio_is_ready_dt(&cs)) {
+    if (!spi_is_ready_dt(&bus) || !gpio_is_ready_dt(&start) ||
+        !gpio_is_ready_dt(&reset) || !gpio_is_ready_dt(&drdy)) {
         ret = -ENODEV;
         goto out;
     }
-
-    ret = gpio_pin_configure_dt(&cs, GPIO_OUTPUT_INACTIVE);
-    if (ret) { goto out; }
-
 
     ret = gpio_pin_configure_dt(&start, GPIO_OUTPUT_INACTIVE);
     if (ret) { goto out; }
@@ -204,8 +172,6 @@ int ads1292r_init(void)
 
     printk("ADS init: running power-up flow with internal test signals\n");
 
-    ret = gpio_pin_set_dt(&cs, 0);
-    if (ret) { goto out; }
     ret = gpio_pin_set_dt(&start, 0);
     if (ret) { goto out; }
 
@@ -230,6 +196,17 @@ int ads1292r_init(void)
     printk("ADS registers: ID=%02x CONFIG1=%02x CONFIG2=%02x CH1SET=%02x CH2SET=%02x\n",
            regs[ADS1292R_REG_ID], regs[REG_CONFIG1], regs[REG_CONFIG2],
            regs[REG_CH1SET], regs[REG_CH2SET]);
+    printk("ADS DRDY before start: logical=%d raw=%d\n",
+           gpio_pin_get_dt(&drdy), gpio_pin_get_raw(drdy.port, drdy.pin));
+
+    if (regs[ADS1292R_REG_ID] != ADS1292R_EXPECTED_ID ||
+        regs[REG_CONFIG1] != 0x00 || regs[REG_CONFIG2] != 0xa3 ||
+        regs[REG_CH1SET] != 0x45 || regs[REG_CH2SET] != 0x45) {
+        printk("ADS register check failed: expected ID=%02x CONFIG1=00 CONFIG2=a3 CH1SET=45 CH2SET=45\n",
+               ADS1292R_EXPECTED_ID);
+        ret = -EIO;
+        goto out;
+    }
 
     printk("ADS init: starting continuous conversion\n");
     ret = gpio_pin_set_dt(&start, 1);
@@ -321,7 +298,6 @@ int ads1292r_read_sample(struct ads1292r_sample *sample)
     uint8_t zeros[ADS1292R_FRAME_SIZE] = {0};
     uint8_t rx[ADS1292R_FRAME_SIZE] = {0};
     int ret;
-    int cs_ret;
 
     if (!sample) { return -EINVAL; }
 
@@ -331,15 +307,7 @@ int ads1292r_read_sample(struct ads1292r_sample *sample)
         goto out;
     }
 
-    ret = gpio_pin_set_dt(&cs, 1);
-    if (ret) { goto out; }
-    k_busy_wait(100);
-
     ret = transfer(zeros, rx, sizeof(rx));
-    k_busy_wait(100);
-
-    cs_ret = gpio_pin_set_dt(&cs, 0);
-    if (ret == 0) { ret = cs_ret; }
     if (ret) { goto out; }
 
     memcpy(sample->raw, rx, sizeof(rx));
