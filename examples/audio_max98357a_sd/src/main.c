@@ -3,7 +3,7 @@
 
 #include "audio_playback.h"
 
-#define AUDIO_TEST_FILE "INSTRU~1.WAV"
+#define AUDIO_TEST_FILE "INST.WAV"
 
 int main(void)
 {

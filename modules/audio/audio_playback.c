@@ -15,6 +15,7 @@
 
 #define AUDIO_BLOCK_SIZE 2048U
 #define AUDIO_NUM_BLOCKS 20U
+#define AUDIO_PREFILL_BLOCKS 4U
 #define AUDIO_SD_DISK_NAME "SD"
 #define AUDIO_SD_MOUNT_POINT "/SD:"
 #define AUDIO_SD_VERBOSE_DISK_PROBE 1
@@ -195,6 +196,50 @@ static void apply_volume(int16_t *samples, size_t sample_count)
     }
 }
 
+static int16_t block_peak_abs(const void *block, size_t bytes)
+{
+    const int16_t *samples = block;
+    size_t sample_count = bytes / sizeof(int16_t);
+    int16_t peak = 0;
+
+    for (size_t i = 0; i < sample_count; i++) {
+        int32_t v = samples[i];
+        int16_t abs_v;
+
+        if (v == INT16_MIN) {
+            abs_v = INT16_MAX;
+        } else {
+            abs_v = (int16_t)(v < 0 ? -v : v);
+        }
+
+        if (abs_v > peak) {
+            peak = abs_v;
+        }
+    }
+
+    return peak;
+}
+
+static int write_i2s_block(void *tx_block, uint32_t block_index,
+                           uint32_t *retry_count)
+{
+    int ret;
+
+    do {
+        ret = i2s_write(i2s_dev, tx_block, AUDIO_BLOCK_SIZE);
+        if (ret == -EAGAIN) {
+            (*retry_count)++;
+            if ((*retry_count % 100U) == 0U) {
+                printk("Audio I2S write busy at block %u retries=%u\n",
+                       block_index, *retry_count);
+            }
+            k_sleep(K_MSEC(1));
+        }
+    } while (ret == -EAGAIN);
+
+    return ret;
+}
+
 static ssize_t fill_tx_block_from_wav(struct fs_file_t *file, void *tx_block,
                                       size_t block_size,
                                       const struct wav_header *hdr)
@@ -273,6 +318,10 @@ int audio_playback_play_file(const char *path)
     struct wav_header hdr;
     char wav_path[AUDIO_PLAYBACK_MAX_PATH];
     size_t bytes_left;
+    uint32_t blocks_written = 0U;
+    uint32_t write_retries = 0U;
+    int64_t stream_start_time = 0;
+    int64_t next_progress_time = 0;
     bool started = false;
     int ret;
 
@@ -318,6 +367,7 @@ int audio_playback_play_file(const char *path)
     while (bytes_left > 0U) {
         void *tx_block;
         ssize_t n;
+        int16_t peak;
 
         ret = k_mem_slab_alloc(&audio_tx_mem_slab, &tx_block, K_FOREVER);
         if (ret < 0) {
@@ -333,26 +383,50 @@ int audio_playback_play_file(const char *path)
             break;
         }
 
-        ret = i2s_write(i2s_dev, tx_block, AUDIO_BLOCK_SIZE);
+        peak = block_peak_abs(tx_block, AUDIO_BLOCK_SIZE);
+        if (blocks_written < AUDIO_PREFILL_BLOCKS) {
+            printk("Audio block %u peak=%d bytes_left=%u\n",
+                   blocks_written, peak, (unsigned int)bytes_left);
+        }
+
+        ret = write_i2s_block(tx_block, blocks_written, &write_retries);
         if (ret < 0) {
-            printk("Audio I2S write failed: %d\n", ret);
+            printk("Audio I2S write failed at block %u: %d\n",
+                   blocks_written, ret);
             k_mem_slab_free(&audio_tx_mem_slab, tx_block);
             break;
         }
+        blocks_written++;
 
-        if (!started) {
+        if (!started && blocks_written >= AUDIO_PREFILL_BLOCKS) {
             ret = i2s_trigger(i2s_dev, I2S_DIR_TX, I2S_TRIGGER_START);
             if (ret < 0) {
                 printk("Audio I2S start failed: %d\n", ret);
                 break;
             }
             started = true;
+            stream_start_time = k_uptime_get();
+            next_progress_time = stream_start_time + 1000;
+            printk("Audio I2S started after %u prefill blocks\n",
+                   blocks_written);
         }
 
         bytes_left -= MIN(bytes_left, (size_t)n);
+
+        if (started && k_uptime_get() >= next_progress_time) {
+            printk("Audio streaming: elapsed=%lld ms blocks=%u bytes_left=%u retries=%u peak=%d\n",
+                   k_uptime_get() - stream_start_time, blocks_written,
+                   (unsigned int)bytes_left, write_retries, peak);
+            next_progress_time += 1000;
+        }
     }
 
+    printk("Audio stream loop exit: started=%d elapsed=%lld ms blocks=%u bytes_left=%u ret=%d retries=%u\n",
+           started, started ? k_uptime_get() - stream_start_time : 0,
+           blocks_written, (unsigned int)bytes_left, ret, write_retries);
+
     if (started) {
+        printk("Audio I2S drain start\n");
         int drain_ret = i2s_trigger(i2s_dev, I2S_DIR_TX, I2S_TRIGGER_DRAIN);
 
         if (drain_ret < 0) {
@@ -361,6 +435,8 @@ int audio_playback_play_file(const char *path)
                 ret = drain_ret;
             }
         }
+        printk("Audio I2S drain complete: %d elapsed=%lld ms\n",
+               drain_ret, k_uptime_get() - stream_start_time);
     }
 
     fs_close(&file);

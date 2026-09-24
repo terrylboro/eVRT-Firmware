@@ -23,17 +23,17 @@
 &pinctrl {
     audio_i2s20_default: audio_i2s20_default {
         group1 {
-            psels = <NRF_PSEL(I2S_SCK_M, 1, 4)>,
+            psels = <NRF_PSEL(I2S_SDOUT, 1, 4)>,
                     <NRF_PSEL(I2S_LRCK_M, 1, 5)>,
-                    <NRF_PSEL(I2S_SDOUT, 1, 6)>;
+                    <NRF_PSEL(I2S_SCK_M, 1, 6)>;
         };
     };
 
     audio_i2s20_sleep: audio_i2s20_sleep {
         group1 {
-            psels = <NRF_PSEL(I2S_SCK_M, 1, 4)>,
+            psels = <NRF_PSEL(I2S_SDOUT, 1, 4)>,
                     <NRF_PSEL(I2S_LRCK_M, 1, 5)>,
-                    <NRF_PSEL(I2S_SDOUT, 1, 6)>;
+                    <NRF_PSEL(I2S_SCK_M, 1, 6)>;
             low-power-enable;
         };
     };
