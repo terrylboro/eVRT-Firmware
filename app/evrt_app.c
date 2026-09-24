@@ -4,14 +4,38 @@
 #include <zephyr/kernel.h>
 
 #include "ads1292r.h"
+#include "audio_playback.h"
 
 #define SAMPLE_PRINT_INTERVAL 25U
+#define AUDIO_TEST_FILE "INST.WAV"
 
 int evrt_app_run(void)
 {
-    printk("ADS1292R SPI transport: mode 1, 1.28 MHz\n");
+    printk("eVRT combined bring-up: audio playback followed by ADS1292R test signal\n");
 
-    int ret = ads1292r_init();
+    int ret = audio_playback_init();
+    if (ret) {
+        printk("Audio initialization failed: %d\n", ret);
+        return ret;
+    }
+
+    ret = audio_playback_set_volume(100);
+    if (ret) {
+        printk("Audio volume setup failed: %d\n", ret);
+        return ret;
+    }
+
+    printk("Audio playback starting: %s\n", AUDIO_TEST_FILE);
+    ret = audio_playback_play_file(AUDIO_TEST_FILE);
+    if (ret) {
+        printk("Audio playback failed: %d\n", ret);
+        return ret;
+    }
+    printk("Audio playback complete; starting ADS1292R internal test signal\n");
+
+    printk("ADS1292R SPI transport: mode 1, 1 MHz\n");
+
+    ret = ads1292r_init();
     if (ret) {
         printk("ADS1292R initialization failed: %d\n", ret);
         return ret;

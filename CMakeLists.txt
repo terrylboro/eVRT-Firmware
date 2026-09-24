@@ -7,9 +7,11 @@ target_sources(app PRIVATE
     app/main.c
     app/evrt_app.c
     modules/ads1292r/ads1292r.c
+    modules/audio/audio_playback.c
 )
 
 target_include_directories(app PRIVATE
     app
     modules/ads1292r
+    modules/audio
 )
