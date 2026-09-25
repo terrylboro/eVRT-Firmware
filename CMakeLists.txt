@@ -8,10 +8,12 @@ target_sources(app PRIVATE
     app/evrt_app.c
     modules/ads1292r/ads1292r.c
     modules/audio/audio_playback.c
+    modules/bluetooth/ble_control.c
 )
 
 target_include_directories(app PRIVATE
     app
     modules/ads1292r
     modules/audio
+    modules/bluetooth
 )

@@ -29,6 +29,8 @@ struct ads1292r_sample {
 };
 
 int ads1292r_init(void);
+int ads1292r_start(void);
+int ads1292r_stop(void);
 int ads1292r_read_registers(uint8_t address, uint8_t *values, size_t count);
 int ads1292r_write_registers(uint8_t address, const uint8_t *values, size_t count);
 int ads1292r_wait_for_sample(k_timeout_t timeout);

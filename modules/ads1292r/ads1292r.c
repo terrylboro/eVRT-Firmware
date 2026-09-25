@@ -58,6 +58,36 @@ static int command_locked(uint8_t value)
     return transfer(&value, NULL, 1);
 }
 
+static int start_conversions_locked(void)
+{
+    int ret;
+
+    ret = gpio_pin_set_dt(&start, 1);
+    if (ret) { return ret; }
+    k_sleep(K_MSEC(10));
+
+    ret = command_locked(CMD_START);
+    if (ret) { return ret; }
+    k_sleep(K_MSEC(10));
+
+    return command_locked(CMD_RDATAC);
+}
+
+static int stop_conversions_locked(void)
+{
+    int ret;
+
+    ret = command_locked(CMD_SDATAC);
+    if (ret) { return ret; }
+    k_sleep(K_MSEC(10));
+
+    ret = command_locked(CMD_STOP);
+    if (ret) { return ret; }
+    k_sleep(K_MSEC(10));
+
+    return gpio_pin_set_dt(&start, 0);
+}
+
 static uint8_t sanitize_write(uint8_t address, uint8_t value)
 {
     switch (address) {
@@ -209,20 +239,52 @@ int ads1292r_init(void)
     }
 
     printk("ADS init: starting continuous conversion\n");
-    ret = gpio_pin_set_dt(&start, 1);
-    if (ret) { goto out; }
-    k_sleep(K_MSEC(10));
-
-    ret = command_locked(CMD_START);
-    if (ret) { goto out; }
-    k_sleep(K_MSEC(10));
-
-    ret = command_locked(CMD_RDATAC);
+    ret = start_conversions_locked();
     if (ret) { goto out; }
 
     ready = true;
     printk("ADS init complete: internal test signal, RDATAC enabled\n");
     ret = 0;
+out:
+    k_mutex_unlock(&lock);
+    return ret;
+}
+
+int ads1292r_start(void)
+{
+    int ret;
+
+    k_mutex_lock(&lock, K_FOREVER);
+    if (!ready) {
+        ret = -EACCES;
+        goto out;
+    }
+
+    ret = start_conversions_locked();
+    if (ret == 0) {
+        printk("ADS conversions started\n");
+    }
+
+out:
+    k_mutex_unlock(&lock);
+    return ret;
+}
+
+int ads1292r_stop(void)
+{
+    int ret;
+
+    k_mutex_lock(&lock, K_FOREVER);
+    if (!ready) {
+        ret = -EACCES;
+        goto out;
+    }
+
+    ret = stop_conversions_locked();
+    if (ret == 0) {
+        printk("ADS conversions stopped\n");
+    }
+
 out:
     k_mutex_unlock(&lock);
     return ret;
