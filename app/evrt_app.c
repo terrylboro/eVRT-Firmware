@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <zephyr/kernel.h>
 
 #include "ads1292r.h"
@@ -10,7 +11,7 @@
 #include "ble_control.h"
 
 #define SAMPLE_PRINT_INTERVAL 25U
-#define AUDIO_TEST_FILE "INST.WAV"
+#define AUDIO_TEST_FILE "embedded INST.WAV"
 #define ADS_PRINT_DURATION K_SECONDS(20)
 #define CMD_QUEUE_DEPTH 8U
 #define ADS_THREAD_STACK_SIZE 2048
@@ -86,7 +87,14 @@ static void handle_cmd(const struct app_cmd *cmd)
     switch (cmd->type) {
     case APP_CMD_PLAY:
         printk("Command PLAY: %s\n", cmd->filename);
-        ret = audio_playback_play_file(cmd->filename);
+        if (cmd->filename[0] == '\0' ||
+            strcmp(cmd->filename, "INST.WAV") == 0 ||
+            strcmp(cmd->filename, AUDIO_TEST_FILE) == 0) {
+            ret = audio_playback_play_embedded();
+        } else {
+            printk("Only embedded INST.WAV playback is available in this build\n");
+            ret = -ENOENT;
+        }
         if (ret) {
             printk("Command PLAY failed: %d\n", ret);
         }
@@ -166,7 +174,7 @@ int evrt_app_run(void)
     }
 
     printk("Audio playback starting: %s\n", AUDIO_TEST_FILE);
-    ret = audio_playback_play_file(AUDIO_TEST_FILE);
+    ret = audio_playback_play_embedded();
     if (ret) {
         printk("Audio playback failed: %d\n", ret);
         return ret;

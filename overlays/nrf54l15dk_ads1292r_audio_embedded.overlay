@@ -1,0 +1,118 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/*
+ * Combined ADS1292R + MAX98357A audio wiring for the Nordic nRF54L15 DK
+ * when the WAV is embedded in firmware instead of read from a MicroSD card.
+ * Configure the DK target voltage to 3V3 before connecting external logic.
+ *
+ * ADS1292R:
+ *   ADS SCK        -> P1.08
+ *   ADS DIN/MOSI   -> P1.09
+ *   ADS DOUT/MISO  -> P1.10
+ *   ADS CS         -> P1.11
+ *   ADS START      -> P1.12
+ *   ADS PWDN/RESET -> P1.13
+ *   ADS DRDY       -> P1.14
+ *
+ * MAX98357A:
+ *   DIN            -> P1.04
+ *   LRC / WS       -> P1.05
+ *   BCLK           -> P1.06
+ */
+
+/ {
+    aliases {
+        i2s-tx = &i2s20;
+    };
+};
+
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&gpiote20 { status = "okay"; };
+&gpiote30 { status = "okay"; };
+&clock { status = "okay"; };
+
+/*
+ * UART20 uses P1.04-P1.07 on the DK. Disable it so I2S can use
+ * P1.04-P1.06; use RTT for console output with this overlay.
+ */
+&uart20 { status = "disabled"; };
+
+/* DK functions sharing selected ADS pins. */
+&button0 { status = "disabled"; };  /* P1.13 / ADS PWDN/RESET */
+&button1 { status = "disabled"; };  /* P1.09 / ADS DIN/MOSI */
+&button2 { status = "disabled"; };  /* P1.08 / ADS SCK */
+&led1 { status = "disabled"; };     /* P1.10 / ADS DOUT/MISO */
+&led3 { status = "disabled"; };     /* P1.14 / ADS DRDY */
+&pwm20 { status = "disabled"; };
+&button3 { status = "disabled"; };  /* P0.04 available; no SD SCK here */
+
+/* spi21 shares this serial block with i2c21/uart21. Keep the owner explicit. */
+&i2c21 { status = "disabled"; };
+&uart21 { status = "disabled"; };
+
+&pinctrl {
+    audio_i2s20_default: audio_i2s20_default {
+        group1 {
+            psels = <NRF_PSEL(I2S_SDOUT, 1, 4)>,
+                    <NRF_PSEL(I2S_LRCK_M, 1, 5)>,
+                    <NRF_PSEL(I2S_SCK_M, 1, 6)>;
+        };
+    };
+
+    audio_i2s20_sleep: audio_i2s20_sleep {
+        group1 {
+            psels = <NRF_PSEL(I2S_SDOUT, 1, 4)>,
+                    <NRF_PSEL(I2S_LRCK_M, 1, 5)>,
+                    <NRF_PSEL(I2S_SCK_M, 1, 6)>;
+            low-power-enable;
+        };
+    };
+
+    ads_spi_default: ads_spi_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 8)>,
+                    <NRF_PSEL(SPIM_MOSI, 1, 9)>;
+        };
+        group2 {
+            psels = <NRF_PSEL(SPIM_MISO, 1, 10)>;
+            bias-pull-up;
+        };
+    };
+
+    ads_spi_sleep: ads_spi_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 8)>,
+                    <NRF_PSEL(SPIM_MOSI, 1, 9)>,
+                    <NRF_PSEL(SPIM_MISO, 1, 10)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2s20 {
+    status = "okay";
+    pinctrl-0 = <&audio_i2s20_default>;
+    pinctrl-1 = <&audio_i2s20_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&spi21 {
+    status = "okay";
+    pinctrl-0 = <&ads_spi_default>;
+    pinctrl-1 = <&ads_spi_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
+
+    ads1292r: adc@0 {
+        compatible = "ti,ads1292r";
+        reg = <0>;
+        spi-max-frequency = <1000000>;
+        spi-cpha;
+        cs-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
+        start-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+        drdy-gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
+    };
+};

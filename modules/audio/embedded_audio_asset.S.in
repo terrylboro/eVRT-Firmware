@@ -1,0 +1,8 @@
+.section .rodata.evrt_audio, "a", %progbits
+.balign 4
+.global evrt_audio_wav_start
+.global evrt_audio_wav_end
+evrt_audio_wav_start:
+.incbin "@EVRT_AUDIO_WAV_ASSET@"
+evrt_audio_wav_end:
+.balign 4

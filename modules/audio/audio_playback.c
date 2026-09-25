@@ -5,11 +5,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(CONFIG_FILE_SYSTEM) && defined(CONFIG_FAT_FILESYSTEM_ELM) && defined(CONFIG_DISK_ACCESS)
+#define AUDIO_SD_BACKEND_ENABLED 1
 #include <ff.h>
-#include <zephyr/drivers/i2s.h>
 #include <zephyr/fs/fs.h>
-#include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
+#else
+#define AUDIO_SD_BACKEND_ENABLED 0
+#endif
+
+#include <zephyr/drivers/i2s.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
@@ -49,7 +55,19 @@ struct wav_header {
     uint32_t data_size;
 } __packed;
 
+struct memory_wav_cursor {
+    const uint8_t *data;
+    size_t len;
+    size_t offset;
+};
+
+typedef int32_t audio_io_count_t;
+typedef audio_io_count_t (*audio_fill_fn)(void *source, void *tx_block,
+                                          size_t block_size,
+                                          const struct wav_header *hdr);
+
 static const struct device *i2s_dev;
+#if AUDIO_SD_BACKEND_ENABLED
 static FATFS fat_fs;
 static struct fs_mount_t sd_mount = {
     .type = FS_FATFS,
@@ -57,8 +75,10 @@ static struct fs_mount_t sd_mount = {
     .mnt_point = AUDIO_SD_MOUNT_POINT,
 };
 static bool sd_mounted;
+#endif
 static uint8_t volume_percent = 100U;
 
+#if AUDIO_SD_BACKEND_ENABLED
 static int probe_sd_disk(void)
 {
     uint8_t sector0[64];
@@ -111,6 +131,7 @@ static int probe_sd_disk(void)
 
     return 0;
 }
+#endif
 
 static void print_wav_header(const struct wav_header *hdr)
 {
@@ -119,6 +140,35 @@ static void print_wav_header(const struct wav_header *hdr)
            hdr->data_size);
 }
 
+static int validate_wav_header(const struct wav_header *hdr)
+{
+    if (memcmp(hdr->riff, "RIFF", 4) != 0 ||
+        memcmp(hdr->wave, "WAVE", 4) != 0 ||
+        memcmp(hdr->fmt_id, "fmt ", 4) != 0 ||
+        memcmp(hdr->data_id, "data", 4) != 0) {
+        printk("Audio WAV layout unsupported\n");
+        return -EINVAL;
+    }
+
+    if (hdr->audio_format != 1U) {
+        printk("Audio WAV must be PCM\n");
+        return -EINVAL;
+    }
+
+    if (hdr->bits_per_sample != 16U) {
+        printk("Audio WAV must be 16-bit PCM\n");
+        return -EINVAL;
+    }
+
+    if (hdr->num_channels != 1U && hdr->num_channels != 2U) {
+        printk("Audio WAV must be mono or stereo\n");
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+#if AUDIO_SD_BACKEND_ENABLED
 static int mount_sd(void)
 {
     int ret;
@@ -163,31 +213,9 @@ static int read_wav_header(struct fs_file_t *file, struct wav_header *hdr)
 
     print_wav_header(hdr);
 
-    if (memcmp(hdr->riff, "RIFF", 4) != 0 ||
-        memcmp(hdr->wave, "WAVE", 4) != 0 ||
-        memcmp(hdr->fmt_id, "fmt ", 4) != 0 ||
-        memcmp(hdr->data_id, "data", 4) != 0) {
-        printk("Audio WAV layout unsupported\n");
-        return -EINVAL;
-    }
-
-    if (hdr->audio_format != 1U) {
-        printk("Audio WAV must be PCM\n");
-        return -EINVAL;
-    }
-
-    if (hdr->bits_per_sample != 16U) {
-        printk("Audio WAV must be 16-bit PCM\n");
-        return -EINVAL;
-    }
-
-    if (hdr->num_channels != 1U && hdr->num_channels != 2U) {
-        printk("Audio WAV must be mono or stereo\n");
-        return -EINVAL;
-    }
-
-    return 0;
+    return validate_wav_header(hdr);
 }
+#endif
 
 static void apply_volume(int16_t *samples, size_t sample_count)
 {
@@ -240,16 +268,81 @@ static int write_i2s_block(void *tx_block, uint32_t block_index,
     return ret;
 }
 
-static ssize_t fill_tx_block_from_wav(struct fs_file_t *file, void *tx_block,
-                                      size_t block_size,
-                                      const struct wav_header *hdr)
+#if AUDIO_SD_BACKEND_ENABLED
+static audio_io_count_t fill_tx_block_from_file(void *source, void *tx_block,
+                                                size_t block_size,
+                                                const struct wav_header *hdr)
 {
+    struct fs_file_t *file = source;
+
     if (hdr->num_channels == 2U) {
         ssize_t n = fs_read(file, tx_block, block_size);
 
         if (n > 0) {
             apply_volume((int16_t *)tx_block, (size_t)n / sizeof(int16_t));
-            if (n < (ssize_t)block_size) {
+            if ((size_t)n < block_size) {
+                memset((uint8_t *)tx_block + n, 0, block_size - (size_t)n);
+            }
+        }
+
+        return (audio_io_count_t)n;
+    }
+
+    int16_t *out = (int16_t *)tx_block;
+    size_t stereo_frames = block_size / (2U * sizeof(int16_t));
+    size_t mono_bytes = stereo_frames * sizeof(int16_t);
+    int16_t mono_buf[AUDIO_BLOCK_SIZE / (2U * sizeof(int16_t))];
+    ssize_t n = fs_read(file, mono_buf, mono_bytes);
+
+    if (n <= 0) {
+        return n;
+    }
+
+    size_t samples_read = (size_t)n / sizeof(int16_t);
+
+    for (size_t i = 0; i < samples_read; i++) {
+        int16_t scaled = (int16_t)(((int32_t)mono_buf[i] * volume_percent) / 100);
+
+        out[2U * i] = scaled;
+        out[(2U * i) + 1U] = scaled;
+    }
+
+    for (size_t i = samples_read; i < stereo_frames; i++) {
+        out[2U * i] = 0;
+        out[(2U * i) + 1U] = 0;
+    }
+
+    return (audio_io_count_t)n;
+}
+#endif
+
+static audio_io_count_t memory_read(struct memory_wav_cursor *cursor, void *dst,
+                                    size_t len)
+{
+    size_t bytes_left = cursor->len - cursor->offset;
+    size_t to_copy = MIN(len, bytes_left);
+
+    if (to_copy == 0U) {
+        return 0;
+    }
+
+    memcpy(dst, &cursor->data[cursor->offset], to_copy);
+    cursor->offset += to_copy;
+    return (audio_io_count_t)to_copy;
+}
+
+static audio_io_count_t fill_tx_block_from_memory(void *source, void *tx_block,
+                                                  size_t block_size,
+                                                  const struct wav_header *hdr)
+{
+    struct memory_wav_cursor *cursor = source;
+
+    if (hdr->num_channels == 2U) {
+        audio_io_count_t n = memory_read(cursor, tx_block, block_size);
+
+        if (n > 0) {
+            apply_volume((int16_t *)tx_block, (size_t)n / sizeof(int16_t));
+            if ((size_t)n < block_size) {
                 memset((uint8_t *)tx_block + n, 0, block_size - (size_t)n);
             }
         }
@@ -261,7 +354,7 @@ static ssize_t fill_tx_block_from_wav(struct fs_file_t *file, void *tx_block,
     size_t stereo_frames = block_size / (2U * sizeof(int16_t));
     size_t mono_bytes = stereo_frames * sizeof(int16_t);
     int16_t mono_buf[AUDIO_BLOCK_SIZE / (2U * sizeof(int16_t))];
-    ssize_t n = fs_read(file, mono_buf, mono_bytes);
+    audio_io_count_t n = memory_read(cursor, mono_buf, mono_bytes);
 
     if (n <= 0) {
         return n;
@@ -300,23 +393,9 @@ static int configure_i2s(const struct wav_header *hdr)
     return i2s_configure(i2s_dev, I2S_DIR_TX, &cfg);
 }
 
-int audio_playback_init(void)
+static int stream_wav_payload(const struct wav_header *hdr, void *source,
+                              audio_fill_fn fill)
 {
-    i2s_dev = DEVICE_DT_GET(DT_ALIAS(i2s_tx));
-    if (!device_is_ready(i2s_dev)) {
-        printk("Audio I2S device is not ready\n");
-        return -ENODEV;
-    }
-
-    printk("Audio playback ready on %s\n", i2s_dev->name);
-    return 0;
-}
-
-int audio_playback_play_file(const char *path)
-{
-    struct fs_file_t file;
-    struct wav_header hdr;
-    char wav_path[AUDIO_PLAYBACK_MAX_PATH];
     size_t bytes_left;
     uint32_t blocks_written = 0U;
     uint32_t write_retries = 0U;
@@ -325,48 +404,17 @@ int audio_playback_play_file(const char *path)
     bool started = false;
     int ret;
 
-    if (!path || path[0] == '\0') {
-        return -EINVAL;
-    }
-
-    ret = mount_sd();
-    if (ret < 0) {
-        return ret;
-    }
-
-    if (path[0] == '/') {
-        snprintk(wav_path, sizeof(wav_path), "%s", path);
-    } else {
-        snprintk(wav_path, sizeof(wav_path), "%s/%s", AUDIO_SD_MOUNT_POINT, path);
-    }
-
-    printk("Audio play: %s\n", wav_path);
-    fs_file_t_init(&file);
-
-    ret = fs_open(&file, wav_path, FS_O_READ);
-    if (ret < 0) {
-        printk("Audio open failed: %d\n", ret);
-        return ret;
-    }
-
-    ret = read_wav_header(&file, &hdr);
-    if (ret < 0) {
-        fs_close(&file);
-        return ret;
-    }
-
-    ret = configure_i2s(&hdr);
+    ret = configure_i2s(hdr);
     if (ret < 0) {
         printk("Audio I2S configure failed: %d\n", ret);
-        fs_close(&file);
         return ret;
     }
 
-    bytes_left = hdr.data_size;
+    bytes_left = hdr->data_size;
 
     while (bytes_left > 0U) {
         void *tx_block;
-        ssize_t n;
+        audio_io_count_t n;
         int16_t peak;
 
         ret = k_mem_slab_alloc(&audio_tx_mem_slab, &tx_block, K_FOREVER);
@@ -375,7 +423,7 @@ int audio_playback_play_file(const char *path)
             break;
         }
 
-        n = fill_tx_block_from_wav(&file, tx_block, AUDIO_BLOCK_SIZE, &hdr);
+        n = fill(source, tx_block, AUDIO_BLOCK_SIZE, hdr);
         if (n <= 0) {
             printk("Audio read/conversion failed: %d\n", (int)n);
             k_mem_slab_free(&audio_tx_mem_slab, tx_block);
@@ -439,8 +487,115 @@ int audio_playback_play_file(const char *path)
                drain_ret, k_uptime_get() - stream_start_time);
     }
 
+    return ret;
+}
+
+int audio_playback_init(void)
+{
+    i2s_dev = DEVICE_DT_GET(DT_ALIAS(i2s_tx));
+    if (!device_is_ready(i2s_dev)) {
+        printk("Audio I2S device is not ready\n");
+        return -ENODEV;
+    }
+
+    printk("Audio playback ready on %s\n", i2s_dev->name);
+    return 0;
+}
+
+int audio_playback_play_file(const char *path)
+{
+#if AUDIO_SD_BACKEND_ENABLED
+    struct fs_file_t file;
+    struct wav_header hdr;
+    char wav_path[AUDIO_PLAYBACK_MAX_PATH];
+    int ret;
+
+    if (!path || path[0] == '\0') {
+        return -EINVAL;
+    }
+
+    ret = mount_sd();
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (path[0] == '/') {
+        snprintk(wav_path, sizeof(wav_path), "%s", path);
+    } else {
+        snprintk(wav_path, sizeof(wav_path), "%s/%s", AUDIO_SD_MOUNT_POINT, path);
+    }
+
+    printk("Audio play: %s\n", wav_path);
+    fs_file_t_init(&file);
+
+    ret = fs_open(&file, wav_path, FS_O_READ);
+    if (ret < 0) {
+        printk("Audio open failed: %d\n", ret);
+        return ret;
+    }
+
+    ret = read_wav_header(&file, &hdr);
+    if (ret < 0) {
+        fs_close(&file);
+        return ret;
+    }
+
+    ret = stream_wav_payload(&hdr, &file, fill_tx_block_from_file);
+
     fs_close(&file);
     return ret;
+#else
+    ARG_UNUSED(path);
+    printk("Audio SD file playback is not built in for this configuration\n");
+    return -ENOTSUP;
+#endif
+}
+
+int audio_playback_play_buffer(const uint8_t *data, size_t len)
+{
+    struct memory_wav_cursor cursor;
+    struct wav_header hdr;
+
+    if (!data || len < sizeof(hdr)) {
+        printk("Audio embedded WAV is missing or too small\n");
+        return -EINVAL;
+    }
+
+    memcpy(&hdr, data, sizeof(hdr));
+    print_wav_header(&hdr);
+
+    int ret = validate_wav_header(&hdr);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if ((size_t)hdr.data_size > len - sizeof(hdr)) {
+        printk("Audio embedded WAV data truncated: header=%u available=%u\n",
+               hdr.data_size, (unsigned int)(len - sizeof(hdr)));
+        return -EINVAL;
+    }
+
+    cursor.data = data;
+    cursor.len = sizeof(hdr) + hdr.data_size;
+    cursor.offset = sizeof(hdr);
+
+    printk("Audio play: embedded WAV (%u bytes)\n", (unsigned int)len);
+    return stream_wav_payload(&hdr, &cursor, fill_tx_block_from_memory);
+}
+
+int audio_playback_play_embedded(void)
+{
+#if defined(EVRT_HAS_EMBEDDED_AUDIO)
+    extern const uint8_t evrt_audio_wav_start[];
+    extern const uint8_t evrt_audio_wav_end[];
+
+    return audio_playback_play_buffer(evrt_audio_wav_start,
+                                      (size_t)(evrt_audio_wav_end -
+                                               evrt_audio_wav_start));
+#else
+    printk("Audio embedded WAV asset not built in; add assets/INST.WAV\n");
+    return -ENOENT;
+#endif
 }
 
 int audio_playback_stop(void)
